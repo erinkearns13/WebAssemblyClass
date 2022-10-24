@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Module</title>
+</head>
+<body>
+    <script>
+        var Module = {
+            'onRuntimeInitialized': () => {
+            //ccall(name, returnType, argumentTypes, args, opts) 
+            // https://emscripten.org/docs/porting/connecting_cpp_and_javascript/Interacting-with-code.html
+            //number, string -> char*, array   Uint8Array Int8Array
+            console.log(Module)
+            console.log(Module.ccall('add', 'number', ['number', 'number'], [3, 4]));
+            //cwrap(name, returnType, argumentTypes)
+            let fibo = Module.cwrap('fibonacci', 'number', ['number']);
+            console.log(fibo(5));
+            console.log(fibo(6));
+            console.log(fibo(7));
+        }
+    };
+    </script>
+    <script src="module.js"></script>
+    <script>
+        console.log(Module().then(module=>{console.log(module)}))
+    </script>
+</body>
+</html>
