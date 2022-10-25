@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+
+<body>
+
+    <script src="./a.out.js"></script>
+    <script>
+        Module.onRuntimeInitialized = _ => {
+            console.log(Module.processMessage(
+                "hello world",
+                {
+                    reverse: false,
+                    exclaim: true,
+                    repeat: 3
+                }
+            )); 
+            //Module.OldStyle.ONE;
+            //Module.NewStyle.TWO;
+
+            const c = new Module.Counter(22);
+            console.log(c.counter); // prints 22
+            c.increase();
+            console.log(c.counter); // prints 23
+            console.log(c.squareCounter()); // prints 529
+            //memory management
+            // c.delete() //if you uncomment this you'll get an error below becuase this delete did happen
+
+            //long running process
+            async function timeoutRunner(obj, time){
+                await new Promise((resolve,reject)=>setTimeout(resolve,time))
+                obj.delete()
+            }
+
+            timeoutRunner(c.clone(), 5000) //these run in parallel and no exceptions happen. delete won't actually happen until reference count goes down to 0
+            timeoutRunner(c.clone(), 1000)
+
+            //Student Array Exercise
+ 
+        
+        };
+    </script>
+</body>
+
+</html>
