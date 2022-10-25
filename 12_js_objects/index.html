@@ -41,8 +41,25 @@
             timeoutRunner(c.clone(), 1000)
 
             //Student Array Exercise
- 
-        
+
+            console.log("Creating student array ..")
+            const v = Module.newStudentVector();
+            console.log("Empty student array:")
+            console.log(v);
+
+
+            console.log("Count after returning from logClone:");
+            console.log(v.$$.count.value);
+
+            console.log("After adding students:");
+            v.push_back( [ 'a', 80.0, 50.0, 90.0 ] );
+            v.push_back( [ 'b', 100.0, 100.0, 100.0 ] );
+
+            console.log(v);
+            a = Module.getAverages(v);
+            console.log("Results:");
+            console.log(a);
+
         };
     </script>
 </body>

@@ -1527,7 +1527,89 @@ var ASM_CONSTS = {
       return demangleAll(js);
     }
 
-  var structRegistrations = {};
+  function ___cxa_allocate_exception(size) {
+      // Thrown object is prepended by exception metadata block
+      return _malloc(size + 16) + 16;
+    }
+
+  /** @constructor */
+  function ExceptionInfo(excPtr) {
+      this.excPtr = excPtr;
+      this.ptr = excPtr - 16;
+  
+      this.set_type = function(type) {
+        HEAP32[(((this.ptr)+(4))>>2)] = type;
+      };
+  
+      this.get_type = function() {
+        return HEAP32[(((this.ptr)+(4))>>2)];
+      };
+  
+      this.set_destructor = function(destructor) {
+        HEAP32[(((this.ptr)+(8))>>2)] = destructor;
+      };
+  
+      this.get_destructor = function() {
+        return HEAP32[(((this.ptr)+(8))>>2)];
+      };
+  
+      this.set_refcount = function(refcount) {
+        HEAP32[((this.ptr)>>2)] = refcount;
+      };
+  
+      this.set_caught = function (caught) {
+        caught = caught ? 1 : 0;
+        HEAP8[(((this.ptr)+(12))>>0)] = caught;
+      };
+  
+      this.get_caught = function () {
+        return HEAP8[(((this.ptr)+(12))>>0)] != 0;
+      };
+  
+      this.set_rethrown = function (rethrown) {
+        rethrown = rethrown ? 1 : 0;
+        HEAP8[(((this.ptr)+(13))>>0)] = rethrown;
+      };
+  
+      this.get_rethrown = function () {
+        return HEAP8[(((this.ptr)+(13))>>0)] != 0;
+      };
+  
+      // Initialize native structure fields. Should be called once after allocated.
+      this.init = function(type, destructor) {
+        this.set_type(type);
+        this.set_destructor(destructor);
+        this.set_refcount(0);
+        this.set_caught(false);
+        this.set_rethrown(false);
+      }
+  
+      this.add_ref = function() {
+        var value = HEAP32[((this.ptr)>>2)];
+        HEAP32[((this.ptr)>>2)] = value + 1;
+      };
+  
+      // Returns true if last reference released.
+      this.release_ref = function() {
+        var prev = HEAP32[((this.ptr)>>2)];
+        HEAP32[((this.ptr)>>2)] = prev - 1;
+        return prev === 1;
+      };
+    }
+  
+  var exceptionLast = 0;
+  
+  var uncaughtExceptionCount = 0;
+  function ___cxa_throw(ptr, type, destructor) {
+      var info = new ExceptionInfo(ptr);
+      // Initialize ExceptionInfo content after it was allocated in __cxa_allocate_exception.
+      info.init(type, destructor);
+      exceptionLast = ptr;
+      uncaughtExceptionCount++;
+      throw ptr;
+    }
+
+  var tupleRegistrations = {};
   
   function runDestructors(destructors) {
       while (destructors.length) {
@@ -1639,6 +1721,66 @@ var ASM_CONSTS = {
           onComplete(typeConverters);
       }
     }
+  function __embind_finalize_value_array(rawTupleType) {
+      var reg = tupleRegistrations[rawTupleType];
+      delete tupleRegistrations[rawTupleType];
+      var elements = reg.elements;
+      var elementsLength = elements.length;
+      var elementTypes = elements.map(function(elt) { return elt.getterReturnType; }).
+                  concat(elements.map(function(elt) { return elt.setterArgumentType; }));
+  
+      var rawConstructor = reg.rawConstructor;
+      var rawDestructor = reg.rawDestructor;
+  
+      whenDependentTypesAreResolved([rawTupleType], elementTypes, function(elementTypes) {
+          elements.forEach(function(elt, i) {
+              var getterReturnType = elementTypes[i];
+              var getter = elt.getter;
+              var getterContext = elt.getterContext;
+              var setterArgumentType = elementTypes[i + elementsLength];
+              var setter = elt.setter;
+              var setterContext = elt.setterContext;
+              elt.read = (ptr) => {
+                  return getterReturnType['fromWireType'](getter(getterContext, ptr));
+              };
+              elt.write = (ptr, o) => {
+                  var destructors = [];
+                  setter(setterContext, ptr, setterArgumentType['toWireType'](destructors, o));
+                  runDestructors(destructors);
+              };
+          });
+  
+          return [{
+              name: reg.name,
+              'fromWireType': function(ptr) {
+                  var rv = new Array(elementsLength);
+                  for (var i = 0; i < elementsLength; ++i) {
+                      rv[i] = elements[i].read(ptr);
+                  }
+                  rawDestructor(ptr);
+                  return rv;
+              },
+              'toWireType': function(destructors, o) {
+                  if (elementsLength !== o.length) {
+                      throw new TypeError("Incorrect number of tuple elements for " + reg.name + ": expected=" + elementsLength + ", actual=" + o.length);
+                  }
+                  var ptr = rawConstructor();
+                  for (var i = 0; i < elementsLength; ++i) {
+                      elements[i].write(ptr, o[i]);
+                  }
+                  if (destructors !== null) {
+                      destructors.push(rawDestructor, ptr);
+                  }
+                  return ptr;
+              },
+              'argPackAdvance': 8,
+              'readValueFromPointer': simpleReadValueFromPointer,
+              destructorFunction: rawDestructor,
+          }];
+      });
+    }
+
+  var structRegistrations = {};
   function __embind_finalize_value_object(structType) {
       var reg = structRegistrations[structType];
       delete structRegistrations[structType];
@@ -3355,6 +3497,43 @@ var ASM_CONSTS = {
       });
     }
 
+  function __embind_register_value_array(
+      rawType,
+      name,
+      constructorSignature,
+      rawConstructor,
+      destructorSignature,
+      rawDestructor
+    ) {
+      tupleRegistrations[rawType] = {
+          name: readLatin1String(name),
+          rawConstructor: embind__requireFunction(constructorSignature, rawConstructor),
+          rawDestructor: embind__requireFunction(destructorSignature, rawDestructor),
+          elements: [],
+      };
+    }
+
+  function __embind_register_value_array_element(
+      rawTupleType,
+      getterReturnType,
+      getterSignature,
+      getter,
+      getterContext,
+      setterArgumentType,
+      setterSignature,
+      setter,
+      setterContext
+    ) {
+      tupleRegistrations[rawTupleType].elements.push({
+          getterReturnType: getterReturnType,
+          getter: embind__requireFunction(getterSignature, getter),
+          getterContext: getterContext,
+          setterArgumentType: setterArgumentType,
+          setter: embind__requireFunction(setterSignature, setter),
+          setterContext: setterContext,
+      });
+    }
+
   function __embind_register_value_object(
       rawType,
       name,
@@ -3408,6 +3587,19 @@ var ASM_CONSTS = {
               return undefined;
           },
       });
+    }
+
+
+  function __emval_incref(handle) {
+      if (handle > 4) {
+          emval_handle_array[handle].refcount += 1;
+      }
+    }
+
+  function __emval_take_value(type, argv) {
+      type = requireRegisteredType(type, '_emval_take_value');
+      var v = type['readValueFromPointer'](argv);
+      return Emval.toHandle(v);
     }
 
   function _abort() {
@@ -3468,6 +3660,9 @@ function intArrayToString(array) {
 
 
 var asmLibraryArg = {
+  "__cxa_allocate_exception": ___cxa_allocate_exception,
+  "__cxa_throw": ___cxa_throw,
+  "_embind_finalize_value_array": __embind_finalize_value_array,
   "_embind_finalize_value_object": __embind_finalize_value_object,
   "_embind_register_bigint": __embind_register_bigint,
   "_embind_register_bool": __embind_register_bool,
@@ -3484,9 +3679,14 @@ var asmLibraryArg = {
   "_embind_register_memory_view": __embind_register_memory_view,
   "_embind_register_std_string": __embind_register_std_string,
   "_embind_register_std_wstring": __embind_register_std_wstring,
+  "_embind_register_value_array": __embind_register_value_array,
+  "_embind_register_value_array_element": __embind_register_value_array_element,
   "_embind_register_value_object": __embind_register_value_object,
   "_embind_register_value_object_field": __embind_register_value_object_field,
   "_embind_register_void": __embind_register_void,
+  "_emval_decref": __emval_decref,
+  "_emval_incref": __emval_incref,
+  "_emval_take_value": __emval_take_value,
   "abort": _abort,
   "emscripten_memcpy_big": _emscripten_memcpy_big,
   "emscripten_resize_heap": _emscripten_resize_heap
